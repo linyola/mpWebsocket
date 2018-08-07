@@ -1,0 +1,131 @@
+<style lang="less">
+  page {
+    line-height: 1.2;
+    font-family:"PingFang SC", -apple-system-font,"Helvetica Neue","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  }
+</style>
+
+<script>
+import Wepy from 'wepy';
+import 'wepy-async-function';
+import Tunnel from './utils/tunnel/tunnel';
+import Session from './utils/session';
+import config from './config';
+import util from './utils/util';
+
+export default class extends Wepy.app {
+  config = {
+    pages: [
+      'pages/index'
+    ],
+    window: {
+      backgroundTextStyle: 'light',
+      navigationBarBackgroundColor: '#008246',
+      navigationBarTitleText: 'websocket',
+      navigationBarTextStyle: 'white',
+      backgroundColor: '#008246'
+    },
+    'debug': true
+  }
+
+  data = {
+    tunnelStatus: 'close', // 统一管理唯一的信道连接的状态：connect、close、reconnecting、reconnect、error
+    tunnel: null,
+    opt: {},
+    appId: config.service.appId,
+    baseUrl: config.service.baseUrl
+  }
+
+  appData = {
+
+  }
+
+  globalData = {
+  }
+
+  constructor () {
+    super();
+    this.use('requestfix');
+    this.use('promisify');
+  }
+
+  async onLaunch(opt) {
+    this.appData.opt = opt;
+  }
+
+  onShow(opt) {
+  }
+
+  // 关闭tunnel
+  closeTunnel() {
+    if (this.data.tunnelStatus !== undefined && this.data.tunnelStatus !== 'close') {
+      this.data.tunnel.close();
+    }
+  }
+  // tunnel:由于一个小程序只能同时连接一个信道而且设计页面跳转后信道对象会销毁问题，所以将其放在app.js中统一管理
+  tunnelCreate() { // 创建一个新信道，并监听相关数据的变化
+    const that = this;
+    // if(this.tunnel !== undefined && this.tunnelStatus==='connect') {
+    //   that.tunnel = this.tunnel;
+    //   return ;
+    // }
+    const tunnel = this.data.tunnel = new Tunnel();  // 放在app对象下供全局使用
+    console.log('config.service.tunnel:', config.service.tunnelUrl);
+    tunnel.open(config.service.tunnelUrl);
+    tunnel.on('connect', () => { // 监听信道连接
+      console.info("tunnelStatus = 'connect'");
+      this.tunnelStatus = 'connect'; // 改变信道状态为已连接
+
+      var obj = {};
+      obj.token = Session.getCookie();
+      obj.userId = Wepy.getStorageSync('uid');
+      this.data.tunnel.auth(tunnel.PACKET_TYPE_AUTH, obj);
+
+      if (that.tunnelConnectCallback) { // 设置回调
+        that.tunnelConnectCallback();
+      }
+    });
+
+    tunnel.on('close', () => { // 监听信道断开
+      console.info("tunnelStatus = 'close'");
+      this.data.tunnelStatus = 'close'; // 改变信道状态为已断开
+      if (that.tunnelCloseCallback) { // 设置回调
+        that.tunnelCloseCallback();
+      }
+    });
+    tunnel.on('reconnecting', () => { // 监听信道重新链接
+      console.info("tunnelStatus = 'reconnecting'");
+      this.data.tunnelStatus = 'reconnecting'; // 改变信道状态为重新连接中
+      if (that.tunnelReconnectingCallback) { // 设置回调
+        that.tunnelReconnectingCallback();
+      }
+    });
+    tunnel.on('reconnect', () => { // 监听信道重新连接成功
+      console.info("tunnelStatus = 'reconnect'");
+      console.info('重连后的信道为:' + tunnel.socketUrl.slice(tunnel.socketUrl.indexOf('tunnelId=') + 9, tunnel.socketUrl.indexOf('&')));
+      this.data.tunnelStatus = 'reconnect'; // 改变信道状态为重新连接成功
+      if (that.tunnelReconnectCallback) { // 设置回调
+        that.tunnelReconnectCallback();
+      }
+    });
+    tunnel.on('error', () => { // 监听信道发生错误
+      console.info("tunnelStatus = 'error'");
+      this.data.tunnelStatus = 'error'; // 改变信道状态为发生错误
+      util.showSuccess('您已断线，请检查联网');
+      Wepy.navigateBack({
+        url: '../entry/entry'
+      });
+      if (that.tunnelErrorCallback) { // 设置回调
+        that.tunnelErrorCallback();
+      }
+    });
+    tunnel.on('PING', () => { // PING-PONG机制:监听服务器PING
+      console.info('接收到PING');
+      tunnel.emit('PONG', {// 给出回应
+        openId: this.appData.openId
+      });
+      console.info('发出了PONG');
+    });
+  }
+}
+</script>

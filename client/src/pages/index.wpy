@@ -1,0 +1,94 @@
+<template>
+  <view class='container'>
+  </view>
+
+</template>
+
+<script>
+import 'wepy-async-function';
+import wepy from 'wepy';
+import config from '../config';
+import util from '../utils/tunnel/util';
+import {match} from '../utils/tunnel/tunnelMacth.js';// 引入匹配函数
+
+const CryptoJS = require('crypto-js');
+export default class Index extends wepy.page {
+  data = {
+  };
+
+  async onLoad(opt) {
+    this.opt = opt;
+    this.$parent.closeTunnel();
+  }
+
+  methods = {
+  };
+  
+  async waitStart() {
+    // 等待服务器返回能否进入的信息之再建立长连接
+    match(this, this.$parent, this.opt);
+    var tunnel = this.$parent.data.tunnel;
+    this.readyBattle();
+    tunnel.on('ActivityStartTimeRep', (res) => {
+      res = JSON.parse(res);
+      console.log('ActivityStartTimeRep', res);
+      if (res.status < 0) {
+        tunnel.close();
+        util.showModel('错误', '活动已经结束，或者活动还未到等候时间！');
+      }
+      if (res.leftTime > 3000) {
+        // this.startCountDown = true;
+        this.leftTime = res.leftTime;
+        this.countDown();
+      }
+    });
+    tunnel.on('HalftimeTips', (res) => {
+      console.log('HalftimeTips:', res);
+      var tempData = JSON.parse(res);
+      this.tips = tempData.tips;
+      this.$apply();
+    });
+  }
+
+  tunnelConnectCallback = () => {
+    console.log('ActivityStartTimeReq matchId:', this.matchId);
+    this.$parent.data.tunnel.emit('ActivityStartTimeReq', {
+      matchId: this.matchId
+    });
+  };
+
+  onUnload() {
+    this.$parent.data.tunnel.close();
+    this.$apply();
+  }
+
+  verify(data) {
+    // 先解密，再校验，校验不通过。直接不显示内容
+    var content = data.content.replace(/\r\n/ig, '');
+    content = content.replace(/\n/ig, '');
+    var result = this.decryptByDES(content, config.service.secret);
+    console.log('result', result);
+    return result;
+  }
+  decryptByDES(ciphertext, key) {
+    var keyHex = CryptoJS.enc.Utf8.parse(key);
+    var decrypted = CryptoJS.DES.decrypt({
+      ciphertext: CryptoJS.enc.Base64.parse(ciphertext)
+    }, keyHex, {
+      mode: CryptoJS.mode.ECB,
+      padding: CryptoJS.pad.Pkcs7
+    });
+    return decrypted.toString(CryptoJS.enc.Utf8);
+  }
+  encryptByDES(message, key) {
+    var keyHex = CryptoJS.enc.Utf8.parse(key);
+    var encrypted = CryptoJS.DES.encrypt(message, keyHex, {
+      mode: CryptoJS.mode.ECB,
+      padding: CryptoJS.pad.Pkcs7
+    });
+    return encrypted.toString();
+  }
+}
+</script>
+<style lang="less">
+</style>
